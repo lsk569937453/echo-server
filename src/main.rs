@@ -23,7 +23,7 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .boxed()
 }
 
-#[tokio::main]
+#[tokio::main(worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
