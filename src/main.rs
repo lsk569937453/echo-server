@@ -7,9 +7,11 @@ use hyper::header::HeaderValue;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::HeaderMap;
-use hyper::{body::Body, Method, Request, Response, StatusCode};
+use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
+use std::time::SystemTime;
+
 use tokio::net::TcpListener;
 #[macro_use]
 extern crate log;
@@ -45,11 +47,27 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .map_err(|never| match never {})
         .boxed()
 }
-
+fn setup_logger() -> Result<(), fern::InitError> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                humantime::format_rfc3339_seconds(SystemTime::now()),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .chain(fern::log_file("access.log")?)
+        .apply()?;
+    Ok(())
+}
 #[tokio::main(worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    env_logger::init();
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    setup_logger()?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], 80));
 
     let listener = TcpListener::bind(addr).await?;
     info!("Listening on http://{}", addr);
@@ -57,10 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (stream, addr) = listener.accept().await?;
         let addr_str = addr.to_string();
         let io = TokioIo::new(stream);
-        // let service =
-        //     service_fn(move |req: Request<Incoming>| async move { echo(req, addr.clone()).await });
         tokio::task::spawn(async move {
-            // let cloned_addr = addr.clone();
             if let Err(err) = http1::Builder::new()
                 .keep_alive(true)
                 .serve_connection(
