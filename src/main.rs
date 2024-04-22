@@ -10,8 +10,9 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
+use tokio::time;
 use tracing::metadata::LevelFilter;
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_appender::rolling;
@@ -34,6 +35,7 @@ async fn echo(
     req: Request<hyper::body::Incoming>,
     remote_ip: String,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    time::sleep(Duration::from_secs(100000));
     let uri = req.uri().clone();
     let path = uri.path().to_string();
     let hash_map = convert(req.headers());
@@ -42,7 +44,7 @@ async fn echo(
     result_map.insert("path", format!("{:?}", path));
 
     let level_filter = tracing_subscriber::filter::LevelFilter::current();
-    info!("ip:{},uri:{}", remote_ip, uri);
+    // info!("ip:{},uri:{}", remote_ip, uri);
 
     Ok(Response::new(full(format!("{:?}", result_map))))
 }
@@ -72,7 +74,7 @@ fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
 #[tokio::main(worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let _workerGuard = setup_logger()?;
-    let addr = SocketAddr::from(([0, 0, 0, 0], 80));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
 
     let listener = TcpListener::bind(addr).await?;
     info!("Listening on http://{}", addr);
