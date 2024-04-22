@@ -11,10 +11,15 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use std::time::SystemTime;
-
 use tokio::net::TcpListener;
+use tracing::metadata::LevelFilter;
+use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
+use tracing_appender::rolling;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
+use tracing_subscriber::{fmt, layer::SubscriberExt};
 #[macro_use]
-extern crate log;
+extern crate tracing;
 fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
     let mut header_hashmap = HashMap::new();
     for (k, v) in headers {
@@ -24,6 +29,7 @@ fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
     }
     header_hashmap
 }
+#[instrument]
 async fn echo(
     req: Request<hyper::body::Incoming>,
     remote_ip: String,
@@ -35,9 +41,8 @@ async fn echo(
     result_map.insert("headers", format!("{:?}", hash_map));
     result_map.insert("path", format!("{:?}", path));
 
-    if log_enabled!(log::Level::Debug) {
-        debug!("ip:{},uri:{},path:{}", remote_ip, uri, path);
-    }
+    let level_filter = tracing_subscriber::filter::LevelFilter::current();
+    info!("ip:{},uri:{}", remote_ip, uri);
 
     Ok(Response::new(full(format!("{:?}", result_map))))
 }
@@ -47,26 +52,26 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .map_err(|never| match never {})
         .boxed()
 }
-fn setup_logger() -> Result<(), fern::InitError> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{} {} {}] {}",
-                humantime::format_rfc3339_seconds(SystemTime::now()),
-                record.level(),
-                record.target(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Debug)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("access.log")?)
-        .apply()?;
-    Ok(())
+fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
+    let app_file = rolling::daily("./", "access.log");
+    let (non_blocking_appender, guard) = NonBlockingBuilder::default()
+        .buffered_lines_limit(10)
+        .finish(app_file);
+    let file_layer = tracing_subscriber::fmt::Layer::new()
+        .with_target(true)
+        .with_ansi(false)
+        .with_writer(non_blocking_appender)
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(tracing_subscriber::filter::LevelFilter::TRACE)
+        .init();
+    Ok(guard)
 }
 #[tokio::main(worker_threads = 8)]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    setup_logger()?;
+    let _workerGuard = setup_logger()?;
     let addr = SocketAddr::from(([0, 0, 0, 0], 80));
 
     let listener = TcpListener::bind(addr).await?;
