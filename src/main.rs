@@ -81,15 +81,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let addr_str = addr.to_string();
         let io = TokioIo::new(stream);
         tokio::task::spawn(async move {
+            let addr_str_cloned = addr_str.clone();
             if let Err(err) = http1::Builder::new()
                 .keep_alive(true)
                 .serve_connection(
                     io,
-                    service_fn(move |req: Request<Incoming>| echo(req, addr_str.clone())),
+                    service_fn(move |req: Request<Incoming>| echo(req, addr_str_cloned.clone())),
                 )
                 .await
             {
-                info!("Error serving connection: {:?}", err);
+                info!("Error serving connection: {:?},addr is:{:}", err, addr_str);
             }
         });
     }
