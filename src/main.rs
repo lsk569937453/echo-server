@@ -35,7 +35,7 @@ async fn echo(
     req: Request<hyper::body::Incoming>,
     remote_ip: String,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    time::sleep(Duration::from_secs(100000));
+    time::sleep(Duration::from_secs(100000)).await;
     let uri = req.uri().clone();
     let path = uri.path().to_string();
     let hash_map = convert(req.headers());
