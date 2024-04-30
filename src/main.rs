@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use bytes::Bytes;
+use clap::Parser;
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::body::Incoming;
 use hyper::header::HeaderValue;
@@ -17,9 +18,22 @@ use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_appender::rolling;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
+mod service;
+use crate::service::grpc_server::run_grpc;
+
 use tracing_subscriber::{fmt, layer::SubscriberExt};
 #[macro_use]
 extern crate tracing;
+#[derive(Parser)]
+#[command(author, version, about, long_about)]
+struct Cli {
+    /// The request url,like http://www.google.com
+    #[arg(default_value_t = 80)]
+    http_port: u32,
+    #[arg(default_value_t = 9898)]
+    grpc_port: u32,
+}
+
 fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
     let mut header_hashmap = HashMap::new();
     for (k, v) in headers {
@@ -53,7 +67,7 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .boxed()
 }
 fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
-    let app_file = rolling::daily("./", "access.log");
+    let app_file = rolling::daily("./logs", "access.log");
     let (non_blocking_appender, guard) = NonBlockingBuilder::default()
         .buffered_lines_limit(10)
         .finish(app_file);
@@ -69,13 +83,20 @@ fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
         .init();
     Ok(guard)
 }
-#[tokio::main(worker_threads = 8)]
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _workerGuard = setup_logger()?;
-    let addr = SocketAddr::from(([0, 0, 0, 0], 80));
+    let _worker_guard = setup_logger()?;
+    let cli: Cli = Cli::parse();
+    let port = cli.http_port;
+    let addr = format!(r#"0.0.0.0:{port}"#);
 
-    let listener = TcpListener::bind(addr).await?;
+    let listener = TcpListener::bind(&addr).await?;
     info!("Listening on http://{}", addr);
+    tokio::spawn(async {
+        if let Err(e) = run_grpc().await {
+            error!("{}", e)
+        }
+    });
     loop {
         let (stream, addr) = listener.accept().await?;
         let addr_str = addr.to_string();
