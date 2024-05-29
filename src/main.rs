@@ -27,8 +27,8 @@ extern crate tracing;
 #[derive(Parser)]
 #[command(author, version, about, long_about)]
 struct Cli {
-    /// The request url,like http://www.google.com
-    #[arg(default_value_t = 80)]
+    /// The http port,default port is 80
+    #[arg(default_value_t = 80, short = 'P', long = "port", value_name = "port")]
     http_port: u32,
     #[arg(default_value_t = 9898)]
     grpc_port: u32,
