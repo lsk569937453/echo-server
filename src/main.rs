@@ -11,8 +11,9 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpListener;
+use tokio::time;
 use tracing::metadata::LevelFilter;
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_appender::rolling;
@@ -54,18 +55,25 @@ fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
 async fn echo(
     req: Request<hyper::body::Incoming>,
     remote_ip: String,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::http::Error> {
     let uri = req.uri().clone();
     let path = uri.path().to_string();
     let hash_map = convert(req.headers());
     let mut result_map = HashMap::new();
     result_map.insert("headers", format!("{:?}", hash_map));
     result_map.insert("path", format!("{:?}", path));
+    // println!("{:?},path is {}", time::Instant::now(), path,);
+    if path == "/api/delay" {
+        time::sleep(Duration::from_secs(10000000)).await;
+    }
 
     let level_filter = tracing_subscriber::filter::LevelFilter::current();
     info!("ip:{},uri:{}", remote_ip, uri);
-
-    Ok(Response::new(full(format!("{:?}", result_map))))
+    let body = full(format!("{:?}", result_map));
+    Response::builder()
+        .header("Connection", "keep-alive")
+        .body(body)
+    // Ok(Response::new(full(format!("{:?}", result_map))))
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
@@ -99,6 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on http://{}", addr);
+    println!("Listening on http://{}", addr);
+
     tokio::spawn(async {
         if let Err(e) = run_grpc().await {
             error!("{}", e)
@@ -108,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (stream, addr) = listener.accept().await?;
         let addr_str = addr.to_string();
         let io = TokioIo::new(stream);
-        tokio::task::spawn(async move {
+        tokio::spawn(async move {
             let addr_str_cloned = addr_str.clone();
             if let Err(err) = http1::Builder::new()
                 .keep_alive(true)
