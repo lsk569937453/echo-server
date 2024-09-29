@@ -1,8 +1,7 @@
-use std::net::SocketAddr;
 
 use bytes::Bytes;
 use clap::Parser;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header::HeaderValue;
 use hyper::server::conn::http1;
@@ -11,17 +10,16 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::Duration;
 use tokio::net::TcpListener;
-use tracing::metadata::LevelFilter;
-use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
+use tokio::time;
 use tracing_appender::rolling;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 mod service;
 use crate::service::grpc_server::run_grpc;
 
-use tracing_subscriber::{fmt, layer::SubscriberExt};
+use tracing_subscriber::layer::SubscriberExt;
 #[macro_use]
 extern crate tracing;
 #[derive(Parser)]
@@ -54,18 +52,25 @@ fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
 async fn echo(
     req: Request<hyper::body::Incoming>,
     remote_ip: String,
-) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::http::Error> {
     let uri = req.uri().clone();
     let path = uri.path().to_string();
     let hash_map = convert(req.headers());
     let mut result_map = HashMap::new();
     result_map.insert("headers", format!("{:?}", hash_map));
     result_map.insert("path", format!("{:?}", path));
+    // println!("{:?},path is {}", time::Instant::now(), path,);
+    if path == "/api/delay" {
+        time::sleep(Duration::from_secs(10000000)).await;
+    }
 
     let level_filter = tracing_subscriber::filter::LevelFilter::current();
     info!("ip:{},uri:{}", remote_ip, uri);
-
-    Ok(Response::new(full(format!("{:?}", result_map))))
+    let body = full(format!("{:?}", result_map));
+    Response::builder()
+        .header("Connection", "keep-alive")
+        .body(body)
+    // Ok(Response::new(full(format!("{:?}", result_map))))
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
@@ -73,32 +78,32 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .map_err(|never| match never {})
         .boxed()
 }
-fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
+fn setup_logger() -> Result<(), anyhow::Error> {
     let app_file = rolling::daily("./logs", "access.log");
-    let (non_blocking_appender, guard) = NonBlockingBuilder::default()
-        .buffered_lines_limit(10)
-        .finish(app_file);
+
     let file_layer = tracing_subscriber::fmt::Layer::new()
         .with_target(true)
         .with_ansi(false)
-        .with_writer(non_blocking_appender)
+        .with_writer(app_file)
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
 
     tracing_subscriber::registry()
         .with(file_layer)
         .with(tracing_subscriber::filter::LevelFilter::TRACE)
         .init();
-    Ok(guard)
+    Ok(())
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _worker_guard = setup_logger()?;
+    setup_logger()?;
     let cli: Cli = Cli::parse();
     let port = cli.http_port;
     let addr = format!(r#"0.0.0.0:{port}"#);
 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on http://{}", addr);
+    println!("Listening on http://{}", addr);
+
     tokio::spawn(async {
         if let Err(e) = run_grpc().await {
             error!("{}", e)
@@ -108,7 +113,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (stream, addr) = listener.accept().await?;
         let addr_str = addr.to_string();
         let io = TokioIo::new(stream);
-        tokio::task::spawn(async move {
+        tokio::spawn(async move {
             let addr_str_cloned = addr_str.clone();
             if let Err(err) = http1::Builder::new()
                 .keep_alive(true)
