@@ -1,8 +1,7 @@
-use std::net::SocketAddr;
 
 use bytes::Bytes;
 use clap::Parser;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Incoming;
 use hyper::header::HeaderValue;
 use hyper::server::conn::http1;
@@ -11,18 +10,16 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::time;
-use tracing::metadata::LevelFilter;
-use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_appender::rolling;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
 mod service;
 use crate::service::grpc_server::run_grpc;
 
-use tracing_subscriber::{fmt, layer::SubscriberExt};
+use tracing_subscriber::layer::SubscriberExt;
 #[macro_use]
 extern crate tracing;
 #[derive(Parser)]
@@ -81,26 +78,24 @@ fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
         .map_err(|never| match never {})
         .boxed()
 }
-fn setup_logger() -> Result<WorkerGuard, anyhow::Error> {
+fn setup_logger() -> Result<(), anyhow::Error> {
     let app_file = rolling::daily("./logs", "access.log");
-    let (non_blocking_appender, guard) = NonBlockingBuilder::default()
-        .buffered_lines_limit(10)
-        .finish(app_file);
+
     let file_layer = tracing_subscriber::fmt::Layer::new()
         .with_target(true)
         .with_ansi(false)
-        .with_writer(non_blocking_appender)
+        .with_writer(app_file)
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
 
     tracing_subscriber::registry()
         .with(file_layer)
         .with(tracing_subscriber::filter::LevelFilter::TRACE)
         .init();
-    Ok(guard)
+    Ok(())
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _worker_guard = setup_logger()?;
+    setup_logger()?;
     let cli: Cli = Cli::parse();
     let port = cli.http_port;
     let addr = format!(r#"0.0.0.0:{port}"#);

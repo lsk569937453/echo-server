@@ -1,4 +1,3 @@
-use crate::service::helloworld::greeter_client::GreeterClient;
 use crate::service::helloworld::greeter_server::Greeter;
 use crate::service::helloworld::greeter_server::GreeterServer;
 use crate::service::helloworld::HelloReply;
