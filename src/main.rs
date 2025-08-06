@@ -1,4 +1,3 @@
-
 use bytes::Bytes;
 use clap::Parser;
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
@@ -16,8 +15,8 @@ use tokio::time;
 use tracing_appender::rolling;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
-mod service;
-use crate::service::grpc_server::run_grpc;
+// mod service;
+// use crate::service::grpc_server::run_grpc;
 
 use tracing_subscriber::layer::SubscriberExt;
 #[macro_use]
@@ -57,8 +56,8 @@ async fn echo(
     let path = uri.path().to_string();
     let hash_map = convert(req.headers());
     let mut result_map = HashMap::new();
-    result_map.insert("headers", format!("{:?}", hash_map));
-    result_map.insert("path", format!("{:?}", path));
+    result_map.insert("headers", format!("{hash_map:?}"));
+    result_map.insert("path", format!("{path:?}"));
     // println!("{:?},path is {}", time::Instant::now(), path,);
     if path == "/api/delay" {
         time::sleep(Duration::from_secs(10000000)).await;
@@ -66,11 +65,10 @@ async fn echo(
 
     let level_filter = tracing_subscriber::filter::LevelFilter::current();
     info!("ip:{},uri:{}", remote_ip, uri);
-    let body = full(format!("{:?}", result_map));
+    let body = full(format!("{result_map:?}"));
     Response::builder()
         .header("Connection", "keep-alive")
         .body(body)
-    // Ok(Response::new(full(format!("{:?}", result_map))))
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
@@ -89,7 +87,7 @@ fn setup_logger() -> Result<(), anyhow::Error> {
 
     tracing_subscriber::registry()
         .with(file_layer)
-        .with(tracing_subscriber::filter::LevelFilter::TRACE)
+        .with(tracing_subscriber::filter::LevelFilter::OFF)
         .init();
     Ok(())
 }
@@ -102,13 +100,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on http://{}", addr);
-    println!("Listening on http://{}", addr);
+    println!("Listening on http://{addr}");
 
-    tokio::spawn(async {
-        if let Err(e) = run_grpc().await {
-            error!("{}", e)
-        }
-    });
     loop {
         let (stream, addr) = listener.accept().await?;
         let addr_str = addr.to_string();
