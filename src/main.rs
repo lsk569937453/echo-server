@@ -9,14 +9,10 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
-use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio::time;
 use tracing_appender::rolling;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
-// mod service;
-// use crate::service::grpc_server::run_grpc;
 
 use tracing_subscriber::layer::SubscriberExt;
 #[macro_use]
@@ -27,48 +23,49 @@ struct Cli {
     /// The http port,default port is 80
     #[arg(default_value_t = 80, short = 'P', long = "port", value_name = "Port")]
     http_port: u32,
-    /// The grpc port,default port is 8989
-
-    #[arg(
-        default_value_t = 8989,
-        short = 'G',
-        long = "grpc_port",
-        value_name = "Grpc Port"
-    )]
-    grpc_port: u32,
 }
 
-fn convert(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
-    let mut header_hashmap = HashMap::new();
-    for (k, v) in headers {
-        let k = k.as_str().to_owned();
-        let v = String::from_utf8_lossy(v.as_bytes()).into_owned();
-        header_hashmap.entry(k).or_insert_with(|| v);
-    }
-    header_hashmap
+fn convert_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, String> {
+    headers
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                String::from_utf8_lossy(v.as_bytes()).to_string(),
+            )
+        })
+        .collect()
 }
-#[instrument]
+
+#[instrument(skip_all, fields(remote_addr = %addr))]
 async fn echo(
-    req: Request<hyper::body::Incoming>,
-    remote_ip: String,
+    req: Request<Incoming>,
+    addr: String,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::http::Error> {
     let uri = req.uri().clone();
-    let path = uri.path().to_string();
-    let hash_map = convert(req.headers());
-    let mut result_map = HashMap::new();
-    result_map.insert("headers", format!("{hash_map:?}"));
-    result_map.insert("path", format!("{path:?}"));
-    // println!("{:?},path is {}", time::Instant::now(), path,);
+    let path = uri.path();
+    info!("Received request for path: {}", path);
+
     if path == "/api/delay" {
-        time::sleep(Duration::from_secs(10000000)).await;
+        // This is a long-blocking operation. In a real application,
+        // you would want to handle this without blocking the executor thread.
+        // For example, by spawning a blocking task.
+        // tokio::task::spawn_blocking(move || {
+        //     std::thread::sleep(Duration::from_secs(10));
+        // }).await.unwrap();
+        warn!("Simulating long delay for path: {}", path);
     }
 
-    let level_filter = tracing_subscriber::filter::LevelFilter::current();
-    info!("ip:{},uri:{}", remote_ip, uri);
-    let body = full(format!("{result_map:?}"));
+    let headers = convert_headers(req.headers());
+    let mut result_map = HashMap::new();
+    result_map.insert("path".to_string(), path.to_string());
+    result_map.insert("headers".to_string(), format!("{headers:?}"));
+
+    let body_json = serde_json::to_string(&result_map).unwrap_or_default();
+
     Response::builder()
-        .header("Connection", "keep-alive")
-        .body(body)
+        .header("Content-Type", "application/json")
+        .body(full(body_json))
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
