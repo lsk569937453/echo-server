@@ -67,7 +67,16 @@ async fn echo(
         .header("Content-Type", "application/json")
         .body(full(body_json))
 }
+async fn hello(
+    _req: Request<Incoming>,
+    addr: String,
+) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::http::Error> {
+    // info!("Hello handler called, remote_addr={}", addr);
 
+    Response::builder()
+        .header("Content-Type", "text/plain; charset=utf-8")
+        .body(full("Hello World"))
+}
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
@@ -109,7 +118,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .keep_alive(true)
                 .serve_connection(
                     io,
-                    service_fn(move |req: Request<Incoming>| echo(req, addr_str_cloned.clone())),
+                    service_fn(move |req: Request<Incoming>| {
+                        let addr = addr_str_cloned.clone();
+                        let path = req.uri().path().to_string();
+
+                        async move {
+                            match path.as_str() {
+                                "/echo" => echo(req, addr).await,
+                                _ => hello(req, addr).await,
+                            }
+                        }
+                    }),
                 )
                 .await
             {
