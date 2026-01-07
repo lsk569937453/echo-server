@@ -9,12 +9,13 @@ use hyper::HeaderMap;
 use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::net::TcpListener;
+use tokio_metrics::TaskMonitor;
 use tracing_appender::rolling;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Layer;
-
-use tracing_subscriber::layer::SubscriberExt;
 #[macro_use]
 extern crate tracing;
 #[derive(Parser)]
@@ -107,6 +108,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = TcpListener::bind(&addr).await?;
     info!("Listening on http://{}", addr);
     println!("Listening on http://{addr}");
+    let monitor = TaskMonitor::new();
+    let runtime_handle = monitor.clone();
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let metrics = runtime_handle.cumulative();
+            println!("========== TOKIO METRICS ==========");
+            println!("Instrumented tasks: {}", metrics.instrumented_count);
+            println!("Dropped tasks: {}", metrics.dropped_count);
+            println!("First poll count: {}", metrics.first_poll_count);
+            println!(
+                "Total first poll delay: {:?}",
+                metrics.total_first_poll_delay
+            );
+            println!("Total idled count: {}", metrics.total_idled_count);
+            println!("Total scheduled count: {}", metrics.total_scheduled_count);
+            println!("Total idle duration: {:?}", metrics.total_idle_duration);
+            println!("===================================");
+        }
+    });
 
     loop {
         let (stream, addr) = listener.accept().await?;
